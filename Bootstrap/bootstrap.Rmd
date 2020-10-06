@@ -1,0 +1,237 @@
+﻿---
+title: ''
+author: "Agora stats "
+date: ''
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,message=FALSE,comment="",warning=FALSE)
+```
+
+<head>
+ <script type="text/javascript"
+src="http://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML">
+    </script>
+</head>
+
+
+### Ejercicio 3
+
+Consideremos una población con ley gamma de parámetros $r = 5$ y $\lambda = \dfrac{1}{4}$.  
+
+#### **(A)**
+Lo que se tiene que hacer es simular muestras aleatorias de una distribución gamma, en nuestro caso, Gamma$(5, \frac{1}{4})$ y tomar la media en cada iteración. La gamma se define mediante dos parámetros, forma y escala, en nuestro caso:  
+
+- parámetro de forma: $5$  
+
+- parámetro de escala: $\dfrac{1}{4}$  
+
+Calcularemos la media de una distribución gamma $10^5$ veces con $n_i=200$, donde $n_i$ es el tamaño de cada muestra, $i=1,...,10^5$.
+```{r}
+
+set.seed(136912)
+n <- numeric(10^5)
+for(i in 1:length(n)){
+  
+  n[i] <- mean(rgamma(200, shape = 5, scale = 1/4))
+}
+
+
+```
+
+Si $X_1,X_2,...,X_n$ son muestras aleatorias de una ley gamma con forma $a$ y escala $b$, la suma $T=X_1+X_2+...+X_n$ es también una gamma con la misma escala pero con forma $an$. Por lo que, la distribución de la media muestral se aconsigue mediante la transformación: $(\bar{X})=T/n$ y tiene densidad $f_{\bar{X}}(x) = n f_T(nx)$.
+
+Esto sigue una gamma con forma $an$ y escala $b/n$. Esto pasa ya que el valor esperado de una observación es $E(X_i) = ab$. La esperanza de su suma es $E(T)=abn$ y la esperanza de la media muestral es igual al valor esperado de una observación $X_i$:
+
+$$ E(\bar{X})=(an)(b/n)=ab.$$
+
+Para la varianza no pasa lo mismo ya que esta depende del tamaño de la muestra, digamos $n$. Para una observación, Var$(X_i)=ab^2$, pero Var$(\bar{X})={(an)}{(b/n)^2} = \dfrac{ab^2}{n} \leq ab^2$, para $n \geq 1$.
+
+
+```{r,fig.height=7,fig.width=7}
+par(mfrow=(c(1,2)))
+hist(n,  xlim = range(n),
+    main = "Distribución muestral", 
+      xlab = "Valores",ylab="Frecuencia",col="steelblue")
+
+qqnorm(n,xlab = "Quantiles teóricos",ylab="Quantiles muestrales")
+qqline(n)
+
+```
+
+#### Análisis descriptivo distribución muestral
+```{r}
+require(knitr)
+kable(cbind(c(paste(names(summary(n)),"    ",sep=""),
+              "Var    "),round(c(as.vector(summary(n)),var(n)),4)))
+```
+
+
+
+\bigskip
+
+\bigskip
+
+#### **(B)**
+Generar una muestra aleatoria de tamaño 200 de la ley gamma. La línea vertical representa el valor de la media.
+
+```{r,fig.height=7,fig.width=7}
+set.seed(1517)
+sample200 <- rgamma(200, shape = 5, scale = 1/4)
+hist(sample200, 
+    main = "muestra n=200 - Gamma(5,1/4)",
+      xlab = "Valores",ylab="Frecuencia",col="steelblue",breaks=12)
+abline(v=mean(sample200),lwd=3,lty=2)
+
+out1 <- round(c(mean(sample200),sd(sample200)),3)
+names(out1) <- c("Mean  ","SD  ")
+kable(out1)
+```
+
+#### **(C)**
+
+```
+Idea principal del bootstrap:
+La muestra original aproxima a la población. Por lo que remuestras de esta muestra se aproximan a lo que 
+obtendríamos si tomaramos muchas muestras de la población. La distribución bootstrap de un estadístico, basada en muchas remuestras, se aproxima a la distribución de muestreo del estadístico, basado en muchas muestras.
+```
+
+Lo que me parece más interesante del bootstrap es que teniendo una muestra y suponiendo que es 'representativa' podemos obtener resultados fiables sin necesidad de obtener nuevas muestras, ya que eso en el mundo real, puede ser costoso o imposible de obtener. En este caso, podemos obtener la distribución bootstrap de la media muestral generando $m$ remuestras (muestras con reemplazo) de nuestra muestra de tamaño $n=200$ y en cada $m_i$ calcular el estadístico muestral, con $i=1,...,10^5$.
+
+
+
+```{r,fig.height=7,fig.width=7}
+M <- 10^5
+boot200 <- numeric(M)
+for (i in 1:M) {
+  x <- sample(x = sample200,size = 200,replace=T)
+  boot200[i] <- mean(x)  ## valor estadístico muestral para cada m_i
+  
+}
+hist(boot200,  xlim = range(n),
+    main = "Distribución bootstrap", 
+      xlab = "Valores",ylab="Frecuencia",col="steelblue")
+
+out1 <- round(c(mean(boot200),sd(boot200)),3)
+names(out1) <- c("Bootstrap mean  ","Standard error  ")
+kable(out1)
+
+
+```
+
+#### **(D)**
+
+Ahora podemos comparar el resultado obtenido mediante bootstrap con la distribución muestral aproximada teórica (con $n=200$). Vemos que la distribución bootstrap es muy parecida a la distribución muestral aproximada. Se refleja que la esperanza es igual a la ley gamma poblacional, pero que la desviación decrece en función del tamaño de la muestra. Este resultado también demuestra que con remuestras de una sola muestra (*muestras permutadas con reemplazamiento*) obtenemos resultados muy iguales a los obtenidos con $10^5$ muestras.
+
+```{r}
+table_out <- data.frame(Mean=round(c(5*(1/4),mean(n),mean(sample200),mean(boot200)),4),
+                        SD =round(
+                          c(sqrt(5*(1/4)^2),sd(n),sd(sample200),sd(boot200)),4))
+
+rownames(table_out) <- c("Población","Distribución muestral aproximada de la media (n=200)",
+                         "Muestra n=200","Distribución bootstrap (remuestras con n=200)")
+
+kable(table_out)
+```
+
+#### Comparación mediante gráficos
+
+Las líneas verticales representan la media.
+```{r,fig.height=8,fig.width=8}
+par(mfrow=c(2,2))
+
+x   <- seq(0,5,length=1000)
+y   <- dgamma(x,shape = 5,scale = 1/4)
+plot(x,y,type="l",lwd=3,col="steelblue",
+     ylab="Densidad",xlab="Valores",main="Población - Gamma(5,1/4)")
+abline(v=5*(1/4),lwd=3,lty=2)
+
+hist(n,  xlim = range(n),
+    main = "Distribución muestral aproximada (n=200)", 
+      xlab = "Valores media muestral",ylab="Frecuencia",col="steelblue")
+abline(v=mean(n),lwd=3,lty=2)
+
+hist(sample200, 
+    main = "muestra n=200 - Gamma(5,1/4)",
+      xlab = "Valores",ylab="Frecuencia",col="steelblue",breaks=10)
+abline(v=mean(sample200),lwd=3,lty=2)
+
+hist(boot200,  xlim = range(n),
+    main = "Distribución bootstrap (n=200)", 
+      xlab = "Valores media muestral",ylab="Frecuencia",col="steelblue")
+abline(v=mean(boot200),lwd=3,lty=2)
+
+
+```
+
+
+#### **(E)**
+
+El problema del bootstrap, es que si cogemos datos no representativos de la población que queremos __dibujar__ (por ejemplo, en este caso, una muestra pequeña), los resultados pueden aproximar el estadístico muestral con sesgo. Para $n=10$, la estimación es sesgada, por lo que los errores son más grandes, error que hará los intervalos bootstrap menos precisos y fiables. La línea vertical representa la media muestral.
+
+
+```{r,fig.height=8,fig.width=8}
+
+set.seed(5050)
+sample50 <- rgamma(50, shape = 5, scale = 1/4)
+M <- 10^5
+boot50 <- numeric(M)
+for (i in 1:M) {
+  x <- sample(x = sample50,size = 50,replace=T)
+  boot50[i] <- mean(x)  ## valor estadístico muestral para cada m_i
+  
+}
+
+set.seed(1010)
+sample10 <- rgamma(10, shape = 5, scale = 1/4)
+boot10 <- numeric(M)
+for (i in 1:M) {
+  x <- sample(x = sample10,size = 10,replace=T)
+  boot10[i] <- mean(x)  ## valor estadístico muestral para cada m_i
+  
+}
+
+
+par(mfrow=c(2,2))
+
+hist(sample10,breaks=5,main="Histograma muestra n=10",
+     xlab="Valores",ylab="Frecuencia",col="steelblue")
+
+
+hist(sample50,breaks=12,main="Histograma muestra n=50",
+     xlab="Valores",ylab="Frecuencia",col="steelblue")
+
+hist(boot10,  xlim = range(boot10),
+    main = "Distribución bootstrap (n=10)", 
+      xlab = "Valores media muestral",ylab="Frecuencia",col="steelblue")
+abline(v=mean(boot10),lwd=3,lty=2)
+
+hist(boot50,  xlim = range(boot50),
+    main = "Distribución bootstrap (n=50)", 
+      xlab = "Valores media muestral",ylab="Frecuencia",col="steelblue")
+abline(v=mean(boot50),lwd=3,lty=2)
+
+cat("--------boot10--------")
+cat("Mean =",mean(boot10))
+cat("Intervalo para la media muestral")
+quantile(boot10,c(0.025,0.975))
+
+cat("--------boot50--------")
+cat("Mean =",mean(boot50))
+cat("Intervalo para la media muestral")
+quantile(boot50,c(0.025,0.975))
+
+cat("--------boot200--------")
+cat("Mean =",mean(boot200))
+cat("Intervalo para la media muestral")
+quantile(boot200,c(0.025,0.975))
+
+
+
+
+```
+
+

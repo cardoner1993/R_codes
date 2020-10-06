@@ -1,0 +1,37 @@
+---
+title: "tally() function"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,message=FALSE,warning=FALSE,comment="")
+```
+
+### Example on mtcars data set
+
+```{r}
+# for info about data set use ?mtcars
+
+mtcars$vs
+
+#  (1)
+table(mtcars$vs)   
+
+```
+
+Use tally() for obtain **(1)** and make plot
+
+```{r}
+require(ggplot2)
+require(dplyr)
+
+data <- mtcars %>% 
+           group_by(vs) %>% tally()
+
+data
+                          
+
+ggplot(data,aes(factor(vs),n),color="red") + geom_bar(stat="identity",fill = "#FF6666") + xlab("")
+
+```
+

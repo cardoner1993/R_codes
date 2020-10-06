@@ -1,0 +1,31 @@
+---
+title: "Example"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+x <- c(rnorm(500, mean = -1), rnorm(500, mean = 1.5))
+y <- c(rnorm(500, mean = 1), rnorm(500, mean = 1.7))
+group <- as.factor(rep(c("A","B"), each=500))
+
+```
+
+# DT (datatable)
+```{r}
+require(DT)
+df <- data.frame(x, y, group)
+datatable(df, filter = 'top',options=list(lengthMenu = c(5,10,20,50,100)))
+```
+
+
+```{r}
+require(ggplot2)
+scatterPlot <- ggplot(df,aes(x, y, color=group)) + 
+  geom_point(size=1.5,position="jitter") + 
+  scale_color_manual(values = c('red','brown'))
+scatterPlot
+```

@@ -1,0 +1,30 @@
+---
+title: "Reduce size of md"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Build it!
+
+
+```{r}
+# load ggplot2 silently
+suppressWarnings(library(ggplot2))
+# chunk option dev="svg" produces very large vector graphics files
+knitr::opts_chunk$set(dev="svg")
+# chunk option dev="png" is the default raster graphics format for HTML output
+knitr::opts_chunk$set(dev="png")
+```
+
+```{r, dpi=20, out.width="300px", out.height="300px"}
+# chunk option dpi=72 is the default resolution
+set.seed(1)
+mydf <- data.frame(x=rnorm(5e4),y=rnorm(5e4))
+a<-ggplot(mydf, aes(x,y)) + geom_point(alpha=0.6)
+require(plotly)
+ggplotly(a)
+```
+

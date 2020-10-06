@@ -1,0 +1,64 @@
+---
+title: "Sample Report"
+output:
+  html_document:
+    toc: true
+    theme: united
+date: ""
+author: agorastats
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,message=FALSE,warning=FALSE)
+```
+
+## Iris data set
+
+```{r data iris}
+
+## Look famous iris data set with  ==> ?iris
+
+## make descriptive
+summary(iris)
+
+#using dplyr()
+library(dplyr)
+
+## mean of sepal information
+iris %>% select(contains("Sepal")) %>% summarise_if(is.numeric,funs(mean=mean)) %>%
+round(3) %>% DT::datatable(options = list(dom='t')) 
+
+# mean of Sepal information by Species
+iris %>%   group_by(Species) %>% select(contains("Sepal"))  %>%   summarise_if(is.numeric,funs(mean = mean)) %>%
+DT::datatable(options = list(dom='t')) 
+
+```
+
+## K-Means Clustering
+```{r kmeans iris}
+
+## make kmeans with petal information
+km=kmeans(x=iris[,c("Petal.Length","Petal.Width")],centers = 3,nstart = 10)
+
+
+```
+
+## Profile of 3 clusters
+
+```{r}
+table(iris$Species,km$cluster)
+```
+
+
+
+## Plot kmeans
+```{r}
+
+library(ggplot2)
+library(dplyr)
+
+attach(iris)
+iris %>% ggplot(aes(x=Petal.Length, y=Petal.Width, color=km$cluster )) + 
+ geom_point(show.legend = FALSE)
+```
+

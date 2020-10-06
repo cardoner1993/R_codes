@@ -1,0 +1,395 @@
+---
+title: "Tree Learning Methods"
+author: "Mattia Barbero - David Cardoner - Arnau Mercader"
+date: ''
+output:
+  html_document:
+    theme: readable
+    toc: yes
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE,message=FALSE,warning=FALSE,comment='',fig.height = 8,fig.width = 6)
+```
+
+## Descripción de los datos
+
+En esta práctica se tiene que analizar un conjunto de datos que involucra 5631 compuestos en donde se analiza la solubilidad. Los compuestos estan categorizados como 'insolubles' (3493 compuestos) o 'soluble' (2138 compuestos). Para cada compuesto, se registran 72 variables estructurales continuas y ruidosas que jugarán el papel de variables explicativas para intentar clasificar el tipo de solubles.
+
+
+### Lectura de datos y carga de paquetes
+
+A continuación se lee la base de datos y se cargan las librerías necesarias para la ejecución de los siguientes comandos R:
+
+
+```{r,echo=TRUE}
+options(width = 10e2)
+# instalar packages necesarios
+list.of.packages <- c("readr","plyr","dplyr","ggplot2","rmarkdown","knitr",
+                      'tidyr','gridExtra','grid','caret','tree')
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+invisible(suppressWarnings(suppressMessages(lapply(list.of.packages, require,character.only = TRUE))))
+list.of.packages <- NULL
+# load dataset / put csv in your directory 
+soldat <- read_csv("soldat.csv")
+```
+
+
+## Análisis exploratorio de los datos {.tabset .tabset-fade .tabset-pills}
+
+A continuación, se analizarán los datos para obtener información descriptiva así como identificar variables inertes o observaciones con valores faltantes.
+
+### Valores faltantes
+
+Para empezar, podemos ver si alguna variable presenta valores faltantes codificados como _NA_ al leer los datos. Solo la variable __x71__ presenta valores faltantes. Se decide prescindir de esta variable en el estudio.
+
+```{r}
+sort(sapply(soldat,function(x)sum((is.na(x)))),decreasing = TRUE)
+# quitamos variable x71
+soldat <- soldat %>% select(-x71) %>% as.data.frame()
+
+```
+
+
+### Histogramas
+
+A la vista de los histogramas, podemos caracterizar diferentes comportamientos en las distribuciones de las variables.
+
+* Asimetría: Podemos intentar corregir el problema aplicando transformación logarítmica.
+
+* Valores extremos: Histogramas que se resumen en una línea visualmente. Podemos intentar corregir el problema escalando los datos o ver si la variable tiene poca variabilidad.
+
+* Variables con valores negativos: No sabemos si las variables solo pueden estar definidas en los reales positivos. Sin embargo, no son muchas las que presentan esta casuística.
+
+
+```{r,echo=FALSE}
+
+hists<-lapply(soldat,function(x){ggplot(data=data.frame(soldat),aes(x=x)) + geom_histogram(fill="lightgreen",bins=30) +
+    ylab("Frequency")})
+
+for(i in 1:ncol(soldat[,-73])){
+  hists[[i]]<-hists[[i]]+xlab(colnames(soldat)[i])
+}
+
+a<-c(seq(9,72,by = 9))
+for( i in 1:length(a)){
+if(i>1){
+do.call("grid.arrange",hists[(a[i-1]+1):a[i]])
+#Sys.sleep(5)
+}
+else{do.call("grid.arrange",hists[1:a[i]])
+# Sys.sleep(5)
+  }
+}
+
+hists <- NULL
+
+```
+
+
+### Variables con valores negativos
+
+A continuación, seleccionemos solo aquellas variables que hemos visto que presentan valores negativos mediante los histogramas.
+
+```{r}
+names0<-names(soldat[, sapply(soldat,  function(x) any(x < 0,na.rm = TRUE))])
+
+```
+
+Estudiemos su comportamiento mediante cuantiles. A la vista de los resultados, la única variable que presenta un efecto más pronunciado en valores negativos es la variable **x63** (con 784 valores). Se decide también remover esta variable del estudio. No se aplicará nada a las variables **x64**, **x65** y **x68**. A las variables **x69** y **x70**, si el valor es más pequeño que 0 se le imputará valor 0.
+
+
+```{r}
+
+sapply(soldat[,names0],  function(x) sum(x < 0,na.rm = TRUE))
+soldat %>% select_(., .dots = names0) %>% select(-y) %>% 
+  gather() %>% ggplot(aes(x = key, y = value)) +
+  stat_ecdf(aes(value),geom = "step",pad = FALSE,size=1.25) + ylab("Accumulate quantile") +
+ scale_y_continuous(breaks = seq(0, 1, by = .1)) +
+  theme(legend.position = "bottom",
+        plot.margin = margin(15, 15, 15, 15),
+        plot.caption = element_text(size = 10),
+        plot.title = element_text(face = 'bold',
+                                  size=12 , hjust=0))  +
+  facet_wrap(~key,scales = 'free') + labs(x='Variables')
+
+# asignamos valores 0 si es <0
+soldat$x69[soldat$x69 < 0] <- 0
+soldat$x70[soldat$x70 < 0] <- 0
+
+```
+
+### Variables con posibles outliers / comportamiento asimétrico
+
+
+Por lo que hace a los histogramas que se resumen en una línea visualmente. Estudiemos su comportamiento aplicando cuantiles:
+
+```{r}
+
+names1 <- c('x51','x52','x54','x61','x62','x28')
+soldat %>% select_(., .dots = names1) %>% 
+  gather() %>% ggplot(aes(x = key, y = value)) +
+  stat_ecdf(aes(value),geom = "step",pad = FALSE,size=1.25) + ylab("Accumulate quantile") +
+ scale_y_continuous(breaks = seq(0, 1, by = .1)) +
+  theme(legend.position = "bottom",
+        plot.margin = margin(15, 15, 15, 15),
+        plot.caption = element_text(size = 10),
+        plot.title = element_text(face = 'bold',
+                                  size=12 , hjust=0))  +
+  facet_wrap(~key,scales='free') + labs(x='Variables')
+```
+
+A la vista de los anteriores gráficos, vemos que la variable **x61** y **x62** presentan una proporción elevada de valor = 0 (40% y 80%), **x28** se mueve entre 0 y 1, y las demás presentan valores muy grandes en comparación a la mayoría de puntos. Se deciden remover del estudio **x61**,**x62**. Las variables **x51, x52 y x54**.
+
+
+### Aplicación de función log(.+1)
+
+Como último paso de esta etapa para quitar el posible efecto de outliers a los datos se reducirán los datos al cuantil <=99.99% de todas las variables, quitando el número de todas las observaciones superiores a este umbral. Una vez realizado este paso, se aplica la función log+1 (para evitar error en observaciones con valor 0) a algunas variables para intentar mejorar su asimetría. A continuación se detallan los __features__ resultantes para nuestro modelo de clasificación separando según si aplicamos transformación log+1 o no:
+
+```{r}
+soldat1 <- soldat %>% filter_all(all_vars(. <= quantile(., 0.999, na.rm = TRUE))) 
+
+dataans <- soldat1 %>% select(-c(x62,x61,x63,x51,x54,x52)) %>% mutate(y=as.factor(y))
+y <- dataans$y
+
+datalog <- dataans %>% select(c(x9:x21,x27:x30,x32:x34,x43:x50,x55:x60,x69:x70)) %>% mutate_all(.funs = log1p)
+dataneg <- dataans %>% select(-c(x9:x21,x27:x30,x32:x34,x43:x50,x55:x60,x69:x70))
+
+dataans <- cbind(datalog,dataneg)
+```
+
+
+```
+Se aplica logaritmo +1 a las variables: x9 a x21, x27 a x30, x32 a x34, x43 a x50, x55 a x60 y x69 a x70.
+
+Se remueven del análisis: x51, x52, x54, x61 a x63, x71
+
+No se aplica logaritmo a las restantes variables
+```
+
+En total, se dispone ahora de `r ncol(dataans)` variables explicativas para construir nuestro modelo de clasificación con un total de `r nrow(dataans)` observaciones.
+
+## Modelos de clasificación
+
+A continuación, se crearán distintos modelos y se comparán sus resultados con fin de escoger aquel con mejores resultados.
+
+### Partición de los datos
+
+Al quitar los cuantiles elevados, perdemos una pequeña proporción de datos (3%), es por eso que al partir nuestros datos en 2 partes (train, test), estas tendrán menos observaciones (2732 cada parte). A continuación se detallan como se analizarán todos los modelos:
+
+- Partición train/test balanceada (50% cada parte). Para particionar los datos se usa como semilla el valor = 1234.
+- Los datos se escalan usando transformación min/max.
+- Se usará como métrica la **accuracy** (exactitud) siempre que no se pueda usar AUC para determinar el mejor modelo. 
+- Para validar los modelos se usará k-fold validation, con k=5.
+
+
+```{r,echo=TRUE}
+
+# Min - Max Scaler
+# columna 66 es la respuesta a modelizar
+maxs<-sapply(dataans[,-66],max)
+mins<-sapply(dataans[,-66],min)
+dataans <- scale(dataans[,-66],center = mins,scale = maxs-mins) %>% as.data.frame()
+dataans <- cbind(dataans, y)
+
+
+# Partición de los datos
+set.seed(1234)
+p <- 0.5
+idx <- sample(1:nrow(dataans),size=p*(nrow(dataans)))
+train <- dataans[idx,]
+test <- dataans[-idx,]
+
+#Configuración de modelos caret.
+set.seed(1234)
+trcl <- trainControl(method = "repeatedcv",
+                     number = 5,
+                     repeats=1,
+                     classProbs = TRUE,
+                     summaryFunction = twoClassSummary) #Class probs genera las probabilidades para -1 y 1.
+
+```
+
+
+## Single tree classifier
+
+Como primer modelo, se usará la función tree para estimar un árbol usando como métrica de split la función **deviance**. Como control del árbol se usarán los parámetros por defecto. Se optimizará el árbol haciendo k-fold y se escogerá aquella poda de árbol con mejor resultado según el mismo criterio que en la construcción del árbol original.
+
+```{r,echo=TRUE}
+### single tree classifier
+set.seed(1234)
+
+tree.mydataset=tree(y~., data = train,split='deviance')
+cv.mydataset=cv.tree(tree.mydataset,K=5)
+prune.mydataset=prune.tree(tree.mydataset,
+                               best=cv.mydataset$size[which.min(cv.mydataset$dev)])
+
+
+```
+
+El valor de exactitud en el conjunto train y test se muestra a continuación. La solución está bastante acotada, es decir, la métrica AUC es bastante igual en ambos modelos:
+
+```{r}
+
+cat("Conjunto TRAIN:\n")
+cartprt<-predict(prune.mydataset, data.frame(train),type = "class")
+Metrics::accuracy(cartprt,train$y)
+cat("Conjunto TEST:\n")
+cartprt<-predict(prune.mydataset, data.frame(test),type = "class")
+Metrics::accuracy(cartprt,test$y)
+
+```
+
+### Random Forest
+
+A continuación, añadiremos complejidad al modelo realizando árboles aleatorios. Como parámetros se optimizará el número de arboles y subconjuntos de variables escogidas al azar. Como métrica de validación se utilizará **AUC**. En el código **R** que se presenta a continuación, se pueden observar los __tunning parameters__ utilizados para estimar el modelo.
+Cabe esperar que al generar árboles de forma aleatoria se consiga mejor performance y menor tendencia al __overfitting__ que con el modelo anterior. 
+
+```{r}
+
+train$y<-mapvalues(train$y, from = c("-1", "1"), to = c("mone", "one"))
+test2<-mapvalues(test$y, from = c("mone", "one"), to = c("-1", "1"))
+
+
+#levels(train$y) <- make.names(levels(factor(train$y)))
+grid = expand.grid(mtry=c(5,6,7,8))
+
+arbol<-train(y ~ ., 
+              data=train, 
+              method="rf",
+              trControl=trcl,
+             tuneGrid=grid,n.trees=2000,
+             metric="ROC")
+
+arbol
+
+cat("Mejor Modelo \n")
+arbol$finalModel
+
+plot(arbol)
+
+plot(varImp(arbol),20,main="Importance Plot RF")
+
+cat("Conjunto TEST:\n")
+cartprt<- predict(arbol, newdata = test,type = 'prob')
+cartprtrf<-ifelse(cartprt$mone>0.5,-1,1)
+
+Metrics::auc(test2,cartprtrf)
+```
+
+
+### Ranger
+
+Se ha decidido implementar __ranger__ en vez de __rf__ por su velocidad y porque está pensado para datos con elevada dimensionalidad. Por defecto se utilizará el índice de gini (Crossentropia) para clasificación. Utilizaremos un grid search para poder analizar otra metodología llamada __Extratrees__. Lo que se busca con este método es reducir la variancia a expensas de un aumento en el sesgo. El modelo no minimizará la perdida Gini sino que de forma aleatoria generará arboles y seleccionará como regla de corte el que genere la mejor separación de los datos (maximiza la pureza del corte). También se realizará un tuneado para definir la profunidad máxima del árbol (min.node.size) y el número de columnas que se utilizarán para generar cada árbol.
+
+A continuación, se puede ver la combinación óptima para la malla que utilizamos para este modelo en formato tabla y mediante gráficos.
+
+```{r}
+#levels(train$y) <- make.names(levels(factor(train$y)))
+grid = expand.grid(mtry=c(5,6,7,8,9),splitrule=c("extratrees","gini"),min.node.size=c(3,5))
+
+arbolran<-train(y ~ ., 
+              data=train, 
+              method="ranger",
+              trControl=trcl,tuneGrid=grid,
+              importance = 'impurity',
+              metric="ROC")
+
+arbolran
+
+arbolran$finalModel
+
+cat("Conjunto TEST:\n")
+cartprt<-predict(arbolran, newdata= test,type = "prob")
+cartprtrang<-ifelse(cartprt$mone>0.5,-1,1)
+Metrics::auc(test2,cartprtrang)
+```
+
+#### Plot and variabe importance
+
+```{r}
+plot(arbolran)
+
+## variable importance
+rfImp <- varImp(arbolran)
+rfImp
+plot(rfImp,top = 20,main="Importance Plot Ranger")
+
+```
+
+
+### Adaboost
+
+Como último modelo, se utilizará el método de __adaboost__, método de __boosting__ pensado para clasificación. El __boosting__ utilizará la perdida exponencial. En cada iteración del modelo iremos generando árboles aleatórios. El modelo de __bosting__ irá generando una suma ponderada de cada uno de los árboles generados, aplicando a cada árbol un coeficiente $\alpha$ que le de un peso específico en la suma.
+
+####Primer modelo
+
+Como primera opción se utilizan __stumps__ (partición única del árbol) y se generarán 2000 árboles aleatorios. Como shrinkage utilizaremos 0.1 y como número de observaciones mínimas por nodo se utilizan 10.
+
+```{r}
+
+#levels(train$y) <- make.names(levels(factor(train$y)))
+grid = expand.grid(n.trees=2000,interaction.depth=1,shrinkage=0.1,n.minobsinnode=10)
+
+##pca o posar totes les dades va rapid.
+
+arboladab<-train (y ~ ., 
+              data=train, 
+              method="gbm",
+              distribution = "adaboost",
+              trControl=trcl,
+              metric="ROC",tuneGrid=grid,verbose=FALSE
+)
+
+arboladab
+
+cat("Conjunto TEST:\n")
+cartprt<-predict(arboladab, data.frame(test),type = "prob")
+
+cartprta1<-ifelse(cartprt$mone>0.5,-1,1)
+Metrics::auc(test2,cartprta1)
+```
+
+
+#### Grid search para __adaboost__
+
+Compararemos si dándole la posibilidad de realizar interacciones (profundidad) el modelo puede mejorar su capacidad predictiva utilizando $1,4,8,16$. A continuación, se puede ver la combinación óptima para la malla que utilizamos para este modelo en formato tabla y mediante gráficos.
+
+```{r}
+grid = expand.grid(n.trees=2000,interaction.depth=c(2,4,6,8),shrinkage=0.1,n.minobsinnode=10)
+
+arbol2<-train (y ~ ., 
+              data=train, 
+              method="gbm",
+              distribution = "adaboost",
+              trControl=trcl,
+              metric="ROC",tuneGrid=grid,verbose=FALSE
+)
+
+arbol2
+
+arbol2$finalModel
+
+cat("Conjunto TEST:\n")
+cartprt<-predict(arbol2, data.frame(test),type = "prob")
+cartprtas<-ifelse(cartprt$mone>0.5,-1,1)
+Metrics::auc(test2,cartprtas)
+
+plot(arbol2)
+
+```
+
+### Conclusiones
+
+Se ha decidido mantenter las variables originales y no añadir com explicativas el __PCA__ de las covariables. La idea que se ha buscado ha sido optimizar la capacidad predictiva en vez de la computacional.
+Presentaremos a continuación una tabla con todos los modelos que se han puesto en competición resumiendo el valor obtenido en la métrica AUC en el conjunto de test para poder visualizar su comportamiento.
+
+```{r,echo=FALSE}
+kable(t(data.frame(rf_AUC = Metrics::auc(test2,cartprtrf), 
+                 ranger_AUC = Metrics::auc(test2,cartprtrang),
+                 adaboost_stump_AUC = Metrics::auc(test2,cartprta1),
+                 adaboost_AUC = Metrics::auc(test2,cartprtas))))
+```
+

@@ -1,0 +1,809 @@
+---
+title: "Artificial Neural Networks & Deep Learning"
+author: "Mattia Barbero - David Cardoner - Arnau Mercader"
+date: ''
+output:
+  html_document:
+    theme: readable
+    toc: yes
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE,message=FALSE,warning=FALSE,comment='',fig.height = 6,fig.width = 8)
+```
+
+# Introducción
+
+## Descripción de los datos
+
+En esta práctica la idea es aprender a usar distintas combinaciones de redes neuronales (NN) y redes profundas (en concreto CNN) para intentar clasificar imágenes en distintas categorías. El conjunto de datos que se usará se puede obtener a través del siguiente enlace: 
+
+http://www.vision.caltech.edu/Image_Datasets/Caltech101/
+
+Se dispone de 101 categorías, la frecuencia de estas categorías se encuentra entre 40 y 800 imágenes. La mayoría de categorías tienen alrededor de 50 imágenes. Las imágenes fueron recolectadas durante el setiembre de 2003 por Fei-Fei Li, Marco Andreetto y Marc ’Aurelio Ranzato. La medida de cada imagen es aproximadamente 300 x 200 píxels.
+
+
+## Paquetes necesarios
+
+El siguiente código permite cargar e instalar, si es necesario, las librerías necesarias para ejecutar todo el código restante.
+
+```{r,echo=TRUE}
+options(width = 10e2)
+# install needed packages
+# for using keras, firstly install Anaconda software
+list.of.packages <- c("readr","plyr","dplyr","ggplot2","rmarkdown","knitr",
+                      'tidyr','keras','OpenImageR')
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+invisible(suppressWarnings(suppressMessages(lapply(list.of.packages, require,character.only = TRUE))))
+list.of.packages <- NULL
+```
+
+Se carga un Rdata para agilizar el output del documento markdown:
+
+```{r load myData}
+load('load0.Rdata')
+```
+
+# Arquitectura NN
+
+A continuación se usarán dos metodologías, descriptores HOG y modificación de la medida de la imágen para entrenar distintas estructuras de redes e intentar definir las más precisas. Como output del modelo se deben escoger 5 categorías de imágenes. A continuación se muestra código R para poder leer las imágenes de forma correcta.  
+
+## Lectura de imágenes 
+
+Para que la red pueda aprender más, se escogerán aquellas categorías que tengan un número de imágenes elevado. Para saber esto, analizemos los directorios donde se encuentran las imágenes. Para usar el siguiente código se supone que tenemos los datos de las imágenes descomprimidos en nuestro directorio de trabajo.
+
+## Definición de directorio de las imágenes
+
+Por tal de ver que categorías escoger, veamos un poco la distribución de nuestras imágenes usando principalmente la función _list.files_ de R. 
+
+```{r,eval=FALSE}
+
+categories <- list.files("101_ObjectCategories/101_ObjectCategories/")
+n_files <- list(length(categories))
+
+for (i in 1:length(categories)) {
+  
+n_files[[i]] <- length(list.files(paste0("101_ObjectCategories/101_ObjectCategories/",categories[i]),
+                           pattern = ".jpg"))
+}
+
+plot(unlist(n_files),col='steelblue',xlim=c(0,102),ylab='Files count',main = 'Freq. of categories')
+idx0 <- which(unlist(n_files) > 200)
+i<- NULL
+```
+
+```{r}
+plot(unlist(n_files),col='steelblue',xlim=c(0,102),ylab='Files count',main = 'Freq. of categories')
+```
+
+Si analizamos el anterior gráfico, vemos que solo 6 categorías superan un conteo de más de 200 imágenes de estas escogeremos 5. A comentar que el vector de directorios tiene medida 102, por lo tanto las categorías parece que son 102 y no 101 (quizás porque las categorías face y face easy se cuentan como una). En la siguiente tabla se resumen las categorías mencionadas anteriormente:
+
+```{r}
+kable(data.frame(category = categories[idx0],
+                 freq=unlist(n_files)[idx0]))
+```
+
+
+## Enfoque HOG
+
+Para esta primera metodología o enfoque usaremos 2 combinaciones de NN, que se detallan a continuación:
+
+* Layer 1: 81 units (input layer), Layer 2: 10 units (hidden layer), Layer 3: 5 units
+(output layer).
+
+* Layer 1: 81 units (input layer), Layer 2: 50 units (hidden layer), Layer 3: 25 units
+(hidden layer), Layer 4: 5 units (output layer).
+
+Para el HOG se usarán 3 celdas y 9 orientaciones lo que dará lugar a 81 columnas (de aquí 81 unidades en la capa de input).
+
+
+A continuación se crea un bucle para leer las imágenes seleccionadas y construir los descriptores. Las 5 categorías escogidas son: __Faces, airplanes, BACKGROUND_Google, Motorbikes y watch__. Para balancear las distintas categorías se escogerá de cada categoría el mínimo global, que es 239.
+
+```{r,eval=FALSE}
+
+path = "101_ObjectCategories/101_ObjectCategories/Faces/"
+path2 = "101_ObjectCategories/101_ObjectCategories/airplanes/"
+path3  = "101_ObjectCategories/101_ObjectCategories/BACKGROUND_Google/"
+path4 = "101_ObjectCategories/101_ObjectCategories/Motorbikes/"
+path5 = "101_ObjectCategories/101_ObjectCategories/watch/"
+
+
+ii<-list.files("101_ObjectCategories/101_ObjectCategories/Faces",pattern = ".jpg")
+j<-list.files("101_ObjectCategories/101_ObjectCategories/airplanes",pattern = ".jpg")
+k<-list.files("101_ObjectCategories/101_ObjectCategories/BACKGROUND_Google",pattern = ".jpg")
+l<-list.files("101_ObjectCategories/101_ObjectCategories/Motorbikes",pattern = ".jpg")
+m<-list.files("101_ObjectCategories/101_ObjectCategories/watch",pattern = ".jpg")
+minim = min(length(ii),length(j),length(k),length(l),length(m))
+
+combof = matrix(nrow=minim,ncol=81)
+combof2 = matrix(nrow=minim,ncol=81)
+combof3 = matrix(nrow=minim,ncol=81)
+combof4 = matrix(nrow=minim,ncol=81)
+combof5 = matrix(nrow=minim,ncol=81)
+
+for (i in 1:minim){
+
+ # reading images  
+image = readImage(paste0(path,ii[i]))
+image2 = readImage(paste0(path2,j[i]))
+image3 = readImage(paste0(path3,k[i]))
+image4 = readImage(paste0(path4,l[i]))
+image5 = readImage(paste0(path5,m[i]))
+
+# resize value of image
+image = image * 255
+image2 = image2 * 255
+image3 = image3 * 255
+image4 = image4 * 255
+image5 = image5 * 255
+
+# perform descriptor   
+hog =  HOG(image, cells = 3, orientations = 9)
+hog2 = HOG(image2, cells = 3, orientations = 9)
+hog3 = HOG(image3, cells = 3, orientations = 9)
+hog4 = HOG(image4, cells = 3, orientations = 9)
+hog5 = HOG(image5, cells = 3, orientations = 9)
+  
+# assign to matrix
+combof[i,] = hog
+combof2[i,] = hog2
+combof3[i,] = hog3
+combof4[i,] = hog4
+combof5[i,] = hog5
+}
+
+
+```
+
+A continuación creamos nuestra variable respuesta y juntamos la información con nuestros descriptores. Obtenemos como resultado un objeto con 1195 filas (239 por 5 categorías), y 82 columnas (81 de los descriptores más la variable respuesta categorizada numéricamente como 0,1,2,3 y 4).
+
+```{r,eval=FALSE}
+
+resp <- rep(c(0,1,2,3,4),each=minim)
+dataimage = data.frame(rbind(combof,combof2,combof3,combof4,combof5))
+dataimage = cbind(dataimage,resp)
+```
+
+A continuación permutamos nuestros datos y separamos nuestro conjunto en 2 partes: train (70\%) y test (30\%). 
+
+```{r,eval=FALSE}
+# permut data
+set.seed(123)
+idx_permut <- sample(c(1:nrow(dataimage),size=nrow(dataimage)))
+dataimage <- dataimage[idx_permut,]
+
+# train / test  (.7 / .3)
+resp_cat  = to_categorical(dataimage[,"resp"],num_classes=5)
+
+set.seed(1000)
+p <- 0.7
+idx <- sample(x = 1:nrow(dataimage),size = p*nrow(dataimage))
+
+
+train_y = resp_cat[idx,]
+train_x = dataimage[idx,-82] %>% as.matrix()
+
+test_y = resp_cat[-idx,]
+test_x = dataimage[-idx,-82] %>% as.matrix()
+
+```
+
+### Primer enfoque HOG
+
+Como se ha comentado antes, como primer enfoque usaremos la siguiente configuración.
+
+* Layer 1: 81 units (input layer), Layer 2: 10 units (hidden layer), Layer 3: 5 units
+(output layer).
+* Como función de activación se usará la función sigmoidal
+* Como métrica de ajuste se usa _Accuracy_
+* Repeticiones usadas (ephocs) = 100
+* Muestras para actualizar el gradiente = 32
+* Porcentaje de train para validación = 25\%
+* Función de activación output = softmax
+
+
+```{r}
+
+a <- Sys.time()
+# KERAS APPROACH 
+model <- keras_model_sequential() 
+# CONF 1. (1 hidden)
+model %>%
+layer_dense(units = 10, activation = 'sigmoid', input_shape = c(81)) %>%
+#layer_dropout(rate = 0.1) %>%
+#layer_batch_normalization() %>%
+layer_dense(units = 5, activation = "softmax")
+
+model %>% compile(
+  loss = "categorical_crossentropy",
+  # (lr = 0.05, decay = 0.001)
+  #optimizer = optimizer_rmsprop(),
+  optimizer = "rmsprop",
+  metrics = c("accuracy")
+)
+
+model %>% compile(
+  loss = "categorical_crossentropy",
+  # (lr = 0.05, decay = 0.001)
+  #optimizer = optimizer_rmsprop(),
+  optimizer = "rmsprop",
+  metrics = c("accuracy")
+)
+
+set.seed(10)
+history <- model %>% fit(
+  train_x, train_y, 
+  # epohcs repeticions per train model
+  # batch_size mostre per actualizar gradient update
+  epochs = 100, batch_size = 32,
+  validation_split = 0.25,
+  callbacks = list(
+    callback_early_stopping(patience=10)
+    
+  )
+)
+
+Sys.time() -a
+
+plot(history)
+
+model %>% evaluate(test_x,test_y)
+pred_test <- model %>% predict_classes(test_x) %>% as.vector()
+table(pred_test,dataimage[-idx,"resp"])
+
+
+
+```
+
+Parece que la red se ajusta bien y se obtienen buenos resultados. Usemos ahora una función intermedia (dropout = 0.1) y como función de activación la rectificador (más conocida como relu), para ver si incrementemos un poco el crecimiento de exactitud.
+
+```{r}
+a <- Sys.time()
+# KERAS APPROACH 2 
+model <- keras_model_sequential() 
+# CONF 1.1. (1 hidden)
+model %>%
+layer_dense(units = 10, activation = 'relu', input_shape = c(81)) %>%
+layer_dropout(rate = 0.1) %>%
+layer_dense(units = 5, activation = "softmax")
+
+model %>% compile(
+  loss = "categorical_crossentropy",
+  # (lr = 0.05, decay = 0.001)
+  #optimizer = optimizer_rmsprop(),
+  optimizer = "rmsprop",
+  metrics = c("accuracy")
+)
+
+model %>% compile(
+  loss = "categorical_crossentropy",
+  # (lr = 0.05, decay = 0.001)
+  #optimizer = optimizer_rmsprop(),
+  optimizer = "rmsprop",
+  metrics = c("accuracy")
+)
+set.seed(10)
+history <- model %>% fit(
+  train_x, train_y, 
+  # epohcs repeticions per train model
+  # batch_size mostre per actualizar gradient update
+  epochs = 100, batch_size = 32,
+  validation_split = 0.25,
+  callbacks = list(
+    callback_early_stopping(patience=10)
+    
+    
+  )
+)
+
+Sys.time() - a
+
+plot(history)
+
+
+model %>% evaluate(test_x,test_y)
+pred_test <- model %>% predict_classes(test_x) %>% as.vector()
+table(pred_test,dataimage[-idx,"resp"])
+
+
+
+
+```
+
+Parece que la antigua red es un poco mejor si vamos comparando el progreso de evaluación de exactitud (eje acc) entre los dos conjuntos de datos. Usemos una estructura con 2 capas internas para intentar mejorar la red.
+
+
+### Segundo enfoque HOG
+
+Como se ha comentado antes, usemos ahora el siguiente enfoque:
+
+* Layer 1: 81 units (input layer), Layer 2: 40 units (hidden layer), Layer 3: 20 units
+(hidden layer), Layer 4: 5 units (output layer).
+* Como función de activación se usará la función sigmoidal y relu
+* Como métrica de ajuste se usa _Accuracy_
+* Repeticiones usadas (ephocs) = 100
+* Muestras para actualizar el gradiente = 32
+* Porcentaje de train para validación = 25\%
+* Función de activación output = softmax
+  
+```{r}
+a <- Sys.time()
+# KERAS APPROACH 
+model <- keras_model_sequential() 
+# CONF 2. ( 2 hidden 40 / 20 )
+
+model %>% 
+
+layer_dense(units = 40, activation = 'sigmoid', input_shape = c(81)) %>%
+layer_dense(units = 20, activation = "relu") %>% 
+layer_dense(units = 5, activation = "softmax")
+
+
+model %>% compile(
+  loss = "categorical_crossentropy",
+  # (lr = 0.05, decay = 0.001)
+  #optimizer = optimizer_rmsprop(),
+  optimizer = "rmsprop",
+  metrics = c("accuracy")
+)
+
+model %>% compile(
+  loss = "categorical_crossentropy",
+  # (lr = 0.05, decay = 0.001)
+  #optimizer = optimizer_rmsprop(),
+  optimizer = "rmsprop",
+  metrics = c("accuracy")
+)
+set.seed(10)
+history <- model %>% fit(
+  train_x, train_y, 
+  # epohcs repeticions per train model
+  # batch_size mostre per actualizar gradient update
+  epochs = 100, batch_size = 32,
+  validation_split = 0.25,
+  callbacks = list(
+    callback_early_stopping(patience=10)
+    # callback_reduce_lr_on_plateau(patience=5)
+  )
+)
+
+Sys.time() - a
+
+
+plot(history)
+
+model %>% evaluate(test_x,test_y)
+pred_test <- model %>% predict_classes(test_x) %>% as.vector()
+table(pred_test,dataimage[-idx,"resp"])
+
+
+```
+
+Parece que esta configuración converge bastante bien, usemos ahora una configuración con 2 capas internas pero con menos inputs y mantegamos la segunda función de activación en relu.
+
+* Layer 1: 81 units (input layer), Layer 2: 25 units (hidden layer), Layer 3: 10 units
+(hidden layer with relu activation), Layer 4: 5 units (output layer).
+
+
+```{r}
+a <- Sys.time()
+# KERAS APPROACH 
+model <- keras_model_sequential() 
+# CONF 2.1 ( 2 hidden 25 / 10 )
+
+model %>% 
+
+layer_dense(units = 25, activation = 'sigmoid', input_shape = c(81)) %>%
+#layer_dropout(rate = 0.3) %>%
+layer_dense(units = 10, activation = "relu") %>% 
+layer_dense(units = 5, activation = "softmax")
+
+
+model %>% compile(
+  loss = "categorical_crossentropy",
+  # (lr = 0.05, decay = 0.001)
+  #optimizer = optimizer_rmsprop(),
+  optimizer = "rmsprop",
+  metrics = c("accuracy")
+)
+
+model %>% compile(
+  loss = "categorical_crossentropy",
+  # (lr = 0.05, decay = 0.001)
+  #optimizer = optimizer_rmsprop(),
+  optimizer = "rmsprop",
+  metrics = c("accuracy")
+)
+
+set.seed(10)
+history <- model %>% fit(
+  train_x, train_y, 
+  # epohcs repeticions per train model
+  # batch_size mostre per actualizar gradient update
+  epochs = 100, batch_size = 32,
+  validation_split = 0.25,
+  callbacks = list(
+    callback_early_stopping(patience=10)
+    # callback_reduce_lr_on_plateau(patience=5)
+  )
+)
+
+Sys.time() -a
+
+plot(history)
+
+
+```
+
+Con una capa interna la red ya da buenos resultados, sin embargo usando otra capa los resultados son relativamente un poco mayores. Veamos como se comporta la red en el conjunto test, reservando anteriormente, al igual que se ha hecho en las anteriores redes entrenadas.
+
+
+```{r}
+
+model %>% evaluate(test_x,test_y)
+pred_test <- model %>% predict_classes(test_x) %>% as.vector()
+table(pred_test,dataimage[-idx,"resp"])
+
+
+```
+
+
+
+## Enfoque modificación medida imagen (resize style)
+
+En este apartado, se usará otra metodología que consiste en trabajar directamente con las imágenes como inputs. En nuestro caso, se ajustará la dimensión de todas las imágenes a 32x32 píxels. El tercer elemento representa la textura de la imagen. Con este proceso, la imágen pierde calidad pero a la vez ganamos en que cada categoría tendrá un patrón más homogeneo, y es con estos patrones con los que nuestra red clasificará. Como antes, se usarán las mismas 5 categorías. Se deben vectorizar las imágenes, por lo que obtendremos inputs con 1024 filas (32x32). 
+
+Algunas fotos de la categoría BACKGROUND_Google no son RGB, por lo que condicionamos el bucle por si en alguna iteración encuentra una imagen que no sea en formato RGB, no use la función rgb_2gray (función que pasa una imagen RGB a escala de grises). A continuación se detalla el proceso para preparar los inputs. Para acelerar el markdown, se carga un Rdata, como ya se ha hecho antes en la creación de los descriptores HOG.
+
+
+```{r}
+load("load1.Rdata")
+```
+
+
+
+```{r,eval=FALSE}
+path = "101_ObjectCategories/101_ObjectCategories/Faces/"
+path2 = "101_ObjectCategories/101_ObjectCategories/airplanes/"
+path3  = "101_ObjectCategories/101_ObjectCategories/BACKGROUND_Google/"
+path4 = "101_ObjectCategories/101_ObjectCategories/Motorbikes/"
+path5 = "101_ObjectCategories/101_ObjectCategories/watch/"
+
+
+ii<-list.files("101_ObjectCategories/101_ObjectCategories/Faces",pattern = ".jpg")
+j<-list.files("101_ObjectCategories/101_ObjectCategories/airplanes",pattern = ".jpg")
+k<-list.files("101_ObjectCategories/101_ObjectCategories/BACKGROUND_Google",pattern = ".jpg")
+l<-list.files("101_ObjectCategories/101_ObjectCategories/Motorbikes",pattern = ".jpg")
+m<-list.files("101_ObjectCategories/101_ObjectCategories/watch",pattern = ".jpg")
+minim = min(length(ii),length(j),length(k),length(l),length(m))
+
+
+greyof = matrix(nrow=minim,ncol=1024)
+greyof2 = matrix(nrow=minim,ncol=1024)
+greyof3 = matrix(nrow=minim,ncol=1024)
+greyof4 = matrix(nrow=minim,ncol=1024)
+greyof5 = matrix(nrow=minim,ncol=1024)
+
+
+for (i in 1:minim){
+  #print(i)
+  # reading images  
+  
+  image =  rgb_2gray(readImage(paste0(path,ii[i])))
+  image2 = rgb_2gray(readImage(paste0(path2,j[i])))
+  image3= readImage(paste0(path3,k[i]))
+  
+  if(length(dim(image3))<3){
+  image3 = image3;
+  } else {image3 = rgb_2gray(image3);}
+  
+  image4 = rgb_2gray(readImage(paste0(path4,l[i])))
+  image5 = rgb_2gray(readImage(paste0(path5,m[i])))
+  
+  
+  
+  small.img = resizeImage(image, width = 32, height = 32, method = 'bilinear')
+  small.img2 = resizeImage(image2, width = 32, height = 32, method = 'bilinear')
+  small.img3 = resizeImage(image3, width = 32, height = 32, method = 'bilinear')
+  small.img4 = resizeImage(image4, width = 32, height = 32, method = 'bilinear')
+  small.img5 = resizeImage(image5, width = 32, height = 32, method = 'bilinear')
+  
+  
+  greyof[i,] =  small.img
+  greyof2[i,] = small.img2
+  greyof3[i,] = small.img3
+  greyof4[i,] = small.img4
+  greyof5[i,] = small.img5
+
+}
+
+
+resp <- rep(c(0,1,2,3,4),each=minim)
+dataimage = data.frame(rbind(greyof,greyof2,greyof3,greyof4,greyof5))
+dataimage = cbind(dataimage,resp)
+
+
+# permut data
+set.seed(123)
+idx_permut <- sample(c(1:nrow(dataimage),size=nrow(dataimage)))
+dataimage <- dataimage[idx_permut,]
+
+# train / test  (.7 / .3)
+resp_cat  = to_categorical(dataimage[,"resp"])
+
+set.seed(1000)
+p <- 0.7
+idx <- sample(x = 1:nrow(dataimage),size = p*nrow(dataimage))
+
+
+
+train_y = resp_cat[idx,]
+train_x = dataimage[idx,-1025] %>% as.matrix()
+
+test_y = resp_cat[-idx,]
+test_x = dataimage[-idx,-1025] %>% as.matrix()
+
+
+```
+
+
+Después de distintas configuraciones, a continuación se detallan 2 para ver su comportamiento y se grafica su performance así como el tiempo CPU. A comentar, cuando ejecutamos el código markdown las funciones keras se usan en formato binario por lo que este tiempo es mucho más rápido que correr Keras en Rstudio, cosa que es realmente muy útil. Estas configuraciones no requieren de mucho tiempo CPU, pero si nuestros inputs fueran muy grandes, quizás ejecutar código vía ejecución markdown nos permite agilizar nuestra implementación.
+
+### Primera configuración 
+
+```{r}
+a <- Sys.time()
+model <- keras_model_sequential() 
+# model %>% 
+#   layer_dense(units = 50, activation = "sigmoid", input_shape = ncol(train_x)) %>% 
+#   #layer_dropout(rate = 0.2) %>% 
+#   #layer_dense(units = 30, activation = "sigmoid") %>%
+#   #layer_dropout(rate = 0.1) %>%
+#   layer_dense(units = 10, activation = "sigmoid") %>%
+#   layer_dense(units = 2, activation = "relu") %>%
+#    layer_dense(units = 5, activation = "softmax")
+
+model %>% 
+  layer_dense(units = 60, activation = "sigmoid", input_shape = ncol(train_x)) %>% 
+  layer_dropout(rate = 0.4) %>% 
+  layer_dense(units = 10, activation = "relu") %>%
+  layer_dense(units = 5, activation = "softmax")
+
+
+model %>% compile(
+  loss = "categorical_crossentropy",
+  optimizer = "rmsprop",
+  metrics = c("accuracy")
+)
+
+history <- model %>% fit(
+  train_x, train_y,
+  epochs = 100, batch_size = 32, 
+  validation_split = 0.25
+)
+
+Sys.time() -a
+
+plot(history)
+
+model %>% evaluate(test_x,test_y)
+pred_test <- model %>% predict_classes(test_x) %>% as.vector()
+table(pred_test,dataimage[-idx,"resp"])
+
+
+```
+
+
+### Segunda configuración
+
+A continuación, en comparación a la anterior configuración, en esta se considera un tamaño batch superior, se reducen a 40 las unidades de la capa inicial e  se incrementa la segunda capa a 20 unidades. Por lo que hace a las funciones de activación, se invierten.
+
+```{r}
+
+a <- Sys.time()
+model <- keras_model_sequential() 
+
+model %>% 
+  layer_dense(units = 40, activation = "relu", input_shape = ncol(train_x)) %>% 
+  layer_dropout(rate = 0.4) %>% 
+  layer_dense(units = 20, activation = "sigmoid") %>%
+  layer_dense(units = 5, activation = "softmax")
+
+
+model %>% compile(
+  loss = "categorical_crossentropy",
+  optimizer = "rmsprop",
+  metrics = c("accuracy")
+)
+
+set.seed(10)
+history <- model %>% fit(
+  train_x, train_y,
+  epochs = 100, batch_size = 80, 
+  validation_split = 0.25
+)
+
+Sys.time() - a 
+
+plot(history)
+
+model %>% evaluate(test_x,test_y)
+pred_test <- model %>% predict_classes(test_x) %>% as.vector()
+table(pred_test,dataimage[-idx,"resp"])
+
+```
+
+Con esta estructura, parece que nuestra validación se bloquea alrededor de 0.7/0.8 (con algunas configuraciones se ha obtenido 0.8 en el test, pero no se acaba de encontrar un algoritmo equilibrado). Por lo que podemos concluir que los descriptores HOG dan mejores resultados.
+
+# Arquitectura CNN
+
+En este último apartado, se considerarán redes convolucionales, estas se usan normalmente en problemas de visión artificial, como en nuestro caso clasificación de imágenes ya que se trabaja con matrices bidimensionales. Nuestros inputs serán imágenes en escala de grises, tal y como hemos trabajado en las configuraciones anteriores pero en este caso no vectorizamos nuestros inputs, formamos arrays, en este caso 32x32x1 e iremos retroalimentando nuestra red. El incoveniente de estas redes, es que su aprendizaje es más lento en comparación a las anteriores configuraciones estudiadas en este documento. A continuación se detallan 2 configuraciones y se dan los outputs respectivos.
+
+
+En este caso, nuestros outputs a clasificar serán solo 3, en concreto las categorías: __airplanes, Motorbikes y Faces__. Como se ha hecho anteriormente, se escogerán tantas imágenes de cada categoría igual al mínimo global de las 3, es decir, 435 imágenes para cada una de las 3 clases. El conjunto de imágenes se dividirá en dos partes por igual.
+
+## Primer enfoque
+
+A continuación, se construyen los inputs y la matriz de respuestas para las 3 categorías y se usa la función array_reshape para obtener las matrices bidimensionales. 
+
+* Muestras para actualizar el gradiente = 50
+* Se valida con un 25\%
+* Como optimizador se usa un optimizador adaptativo, en concreto adadelta.
+* Como métrica de
+* Como función de activación se usará la función relu.
+* Como métrica de ajuste se usa _Accuracy_
+* Repeticiones usadas (ephocs) = 100
+* Función de activación output = softmax
+
+
+
+```{r}
+a <- Sys.time()
+resp <- rep(c(0,1,2),each=minim)
+dataimage2 = data.frame(rbind(greyof,greyof2,greyof4))
+dataimage2 = cbind(dataimage2,resp)
+# permut data
+set.seed(123)
+idx_permut <- sample(c(1:nrow(dataimage2),size=nrow(dataimage2)))
+dataimage2 <- dataimage2[idx_permut,]
+
+# train / test  (.5 / .5)
+resp_cat  = to_categorical(dataimage2[,"resp"])
+
+set.seed(1000)
+p <- 0.5
+idx <- sample(x = 1:nrow(dataimage2),size = p*nrow(dataimage2))
+
+train_y = resp_cat[idx,]
+train_x = dataimage2[idx,-1025] %>% as.matrix()
+
+test_y = resp_cat[-idx,]
+test_x = dataimage2[-idx,-1025] %>% as.matrix()
+
+
+train_x <- array_reshape(train_x, c(nrow(train_x), 32, 32, 1))
+test_x <- array_reshape(test_x, c(nrow(test_x), 32,32, 1))
+
+model <- keras_model_sequential() %>%
+  layer_conv_2d(filters = 20, kernel_size = c(3,3), activation = 'relu',
+                input_shape = c(32,32,1)) %>% 
+  #layer_conv_2d(filters = 64, kernel_size = c(3,3), activation = 'relu') %>% 
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>% 
+  #layer_dropout(rate = 0.2) %>% 
+  layer_flatten() %>% 
+  layer_dense(units = 128, activation = 'relu') %>% 
+  #layer_dropout(rate = 0.2) %>% 
+  layer_dense(units = 3, activation = 'softmax')
+
+# Print a summary of a model
+#summary(model)
+
+# Compile model
+model %>% compile(
+  loss = loss_categorical_crossentropy,
+  optimizer = optimizer_adadelta(),
+  metrics = c('accuracy')
+)
+
+set.seed(10)
+# Train model
+model %>% fit(
+  train_x, train_y,
+  batch_size = 50,
+  epochs = 100,
+  validation_split = 0.25
+)
+
+Sys.time() - a
+
+
+plot(history)
+
+model %>% evaluate(test_x,test_y)
+pred_test <- model %>% predict_classes(test_x) %>% as.vector()
+table(pred_test,dataimage2[-idx,"resp"])
+
+```
+
+## Segundo enfoque
+
+A continuación, se detalla la configuración de otra estructura CNN.
+
+```{r}
+model <- keras_model_sequential() %>%
+  layer_conv_2d(filters = 32, kernel_size = c(3,3), activation = 'relu',
+                input_shape = c(32,32,1)) %>% 
+  layer_conv_2d(filters = 64, kernel_size = c(3,3), activation = 'relu') %>% 
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>% 
+  layer_dropout(rate = 0.2) %>% 
+  layer_flatten() %>% 
+  layer_dense(units = 128, activation = 'relu') %>% 
+  layer_dropout(rate = 0.2) %>% 
+  layer_dense(units = 3, activation = 'softmax')
+
+# Print a summary of a model
+#summary(model)
+
+```
+
+
+
+Por lo que hace a características del algoritmo:
+
+* Muestras para actualizar el gradiente = 50
+* Se valida con un 25\%
+* Como optimizador se usa un optimizador adaptativo, en concreto adadelta.
+* Como métrica de
+* Como función de activación se usará la función relu.
+* Como métrica de ajuste se usa _Accuracy_
+* Repeticiones usadas (ephocs) = 100
+* Función de activación output = softmax
+
+
+```{r}
+
+a <- Sys.time()
+
+# Compile model
+model %>% compile(
+  loss = loss_categorical_crossentropy,
+  optimizer = optimizer_adadelta(),
+  metrics = c('accuracy')
+)
+
+# Train model
+model %>% fit(
+  train_x, train_y,
+  batch_size = 50,
+  epochs = 100,
+  validation_split = 0.25
+)
+
+Sys.time() -a 
+
+
+plot(history)
+
+model %>% evaluate(test_x,test_y)
+pred_test <- model %>% predict_classes(test_x) %>% as.vector()
+table(pred_test,dataimage2[-idx,"resp"])
+
+```
+
+# Conclusiones
+
+Esta práctica a sido muy enriquecedora para entrar en el mundo de las redes y empezar a tocar código e ideas que a principio parecen muy difíciles pero a nivel práctico se puede aprender con bastante facilidad ya que existen multitud de ejemplos y artículos en internet. Por lo que hace a los 3 enfoques usados, podemos acabar haciendo un ranking:
+
+* El mejor clasificador se obtiene sin duda mediante redes convolucionales (CNN), sin embargo, su tiempo de ejecución es más costoso respecto a los demás.
+
+* Los descriptores HOG dan resultados muy iguales a CNN y tanto su construcción como entrenamiento es mucho menos costoso.
+
+* Como último el uso de reescalado de las imágenes es una opción costosa por lo que hace a construcción y su rendimiento es un poco inferior pero sus resultados también son satisfactorios. Quizás estudiando mejor las imágenes, como usar rotaciones o subpartes de estas los resultados serían más elevados.
+
+
+
+
+
+
